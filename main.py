@@ -50,6 +50,19 @@ DB_CONFIG = {
 }
 
 
+def should_skip_online_appointments_email(email_data: dict) -> bool:
+    """
+    Check if the email is a weekly online appointments email that should be skipped
+    These emails contain 'Saved filters: Appointments - Online (Last Week)' in the body
+    """
+    body = email_data.get('body', '')
+    body_html = email_data.get('bodyHtml', '')
+    
+    # Check both plain text and HTML body
+    skip_indicator = 'Saved filters: Appointments - Online (Last Week)'
+    return skip_indicator in body or skip_indicator in body_html
+
+
 def extract_clinic_name(email_address: str) -> str:
     """
     Extract clinic name from email address between + and @
@@ -603,8 +616,18 @@ def insert_clients_data(database_name: str, df: pd.DataFrame):
 def process_attachment_and_store(email_data: dict):
     """
     Process email attachments and store data in appropriate database
+    Skips weekly online appointments emails (identified by body content)
     """
     try:
+        # Check if this is a weekly online appointments email that should be skipped
+        if should_skip_online_appointments_email(email_data):
+            logger.info("Skipping weekly online appointments email - contains 'Saved filters: Appointments - Online (Last Week)'")
+            return {
+                "status": "skipped",
+                "message": "Weekly online appointments email - not processed",
+                "reason": "Contains 'Saved filters: Appointments - Online (Last Week)'"
+            }
+        
         # Extract clinic name from 'to' field
         to_email = email_data.get('to', '')
         clinic_name = extract_clinic_name(to_email)
