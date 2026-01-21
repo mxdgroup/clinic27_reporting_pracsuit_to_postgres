@@ -9,6 +9,7 @@ This project forwards emails from Gmail to a FastAPI endpoint, logs the complete
 - **Clinic Extraction**: Extracts clinic name from email address (e.g., `developers.mxd+supertest@gmail.com` → `supertest` database)
 - **Comprehensive Logging**: Logs all email data to both files and console
 - **Railway PostgreSQL Support**: Configured for remote Railway database hosting
+- **Weekly Online Appointments Support**: Detects emails containing `Saved filters: Appointments - Online (Last Week)` and writes them to the dedicated `appointments_online` database for long-term tracking
 
 ## Setup
 
@@ -101,6 +102,13 @@ Copy the ngrok URL and update it in the Google Apps Script.
 4. **Attachment Processing**: Excel attachments are processed to determine table structure
 5. **Table Creation**: Tables are created based on the first word of the filename
    - Example: `Appointment Report 281025_1151PM.xlsx` → `appointments` table
+
+### Weekly Online Appointments Database
+
+- Emails that include the text `Saved filters: Appointments - Online (Last Week)` in their body are treated as the weekly online-only export from PracSuite
+- Those emails are automatically routed to the shared `appointments_online` database (configurable via the `ONLINE_APPOINTMENTS_DB` environment variable)
+- The standard `appointments` table schema is created inside that database and populated just like the clinic-specific exports
+- You can override the matching text with the `ONLINE_APPOINTMENTS_KEYWORD` environment variable if PracSuite changes the email wording
 
 ### Appointments Table Schema
 

@@ -49,6 +49,13 @@ DB_CONFIG = {
     'admin_db': os.getenv('POSTGRES_ADMIN_DB', 'postgres')
 }
 
+# Online appointments configuration
+ONLINE_APPOINTMENTS_DB = os.getenv('ONLINE_APPOINTMENTS_DB', 'appointments_online')
+ONLINE_APPOINTMENTS_KEYWORD = os.getenv(
+    'ONLINE_APPOINTMENTS_KEYWORD',
+    'Saved filters: Appointments - Online (Last Week)'
+)
+
 
 def extract_clinic_name(email_address: str) -> str:
     """
@@ -85,6 +92,19 @@ def extract_table_name(filename: str) -> str:
         if table_name and not table_name.endswith('s'):
             table_name += 's'
         return table_name
+
+
+def is_online_appointments_email(email_data: dict) -> bool:
+    """Determine if the email relates to the weekly online appointment export"""
+    keyword = (ONLINE_APPOINTMENTS_KEYWORD or '').strip().lower()
+    if not keyword:
+        return False
+    # Search through available body fields for the configured keyword
+    for field in ('body', 'bodyHtml'):
+        content = email_data.get(field)
+        if isinstance(content, str) and keyword in content.lower():
+            return True
+    return False
 
 
 def get_db_connection(database_name: str = None):
@@ -605,18 +625,24 @@ def process_attachment_and_store(email_data: dict):
     Process email attachments and store data in appropriate database
     """
     try:
-        # Extract clinic name from 'to' field
-        to_email = email_data.get('to', '')
-        clinic_name = extract_clinic_name(to_email)
+        online_weekly_email = is_online_appointments_email(email_data)
+        if online_weekly_email:
+            database_name = ONLINE_APPOINTMENTS_DB
+            logger.info(
+                f"Detected weekly online appointment report email. Target database: {database_name}"
+            )
+        else:
+            # Extract clinic name from 'to' field for standard clinic-specific emails
+            to_email = email_data.get('to', '')
+            database_name = extract_clinic_name(to_email)
+            if not database_name:
+                logger.warning(f"Could not extract clinic name from email: {to_email}")
+                return {"status": "error", "message": "Invalid email format"}
         
-        if not clinic_name:
-            logger.warning(f"Could not extract clinic name from email: {to_email}")
-            return {"status": "error", "message": "Invalid email format"}
+        logger.info(f"Processing email for database: {database_name}")
         
-        logger.info(f"Processing email for clinic: {clinic_name}")
-        
-        # Create database for clinic
-        if not create_database(clinic_name):
+        # Create database for clinic/online storage
+        if not create_database(database_name):
             return {"status": "error", "message": "Failed to create database"}
         
         # Process attachments
@@ -635,11 +661,11 @@ def process_attachment_and_store(email_data: dict):
             # Process Appointments
             if table_name == 'appointments':
                 # Create the appointments table
-                if not create_appointments_table(clinic_name):
+                if not create_appointments_table(database_name):
                     results.append({
                         "filename": filename,
                         "table": table_name,
-                        "database": clinic_name,
+                        "database": database_name,
                         "status": "error",
                         "message": "Failed to create table"
                     })
@@ -652,7 +678,7 @@ def process_attachment_and_store(email_data: dict):
                     results.append({
                         "filename": filename,
                         "table": table_name,
-                        "database": clinic_name,
+                        "database": database_name,
                         "status": "warning",
                         "message": "No attachment data found"
                     })
@@ -664,20 +690,20 @@ def process_attachment_and_store(email_data: dict):
                     results.append({
                         "filename": filename,
                         "table": table_name,
-                        "database": clinic_name,
+                        "database": database_name,
                         "status": "error",
                         "message": "Failed to parse Excel file or file is empty"
                     })
                     continue
                 
                 # Insert data into database
-                insert_result = insert_appointments_data(clinic_name, df)
+                insert_result = insert_appointments_data(database_name, df)
                 
                 if insert_result['success']:
                     results.append({
                         "filename": filename,
                         "table": table_name,
-                        "database": clinic_name,
+                        "database": database_name,
                         "status": "success",
                         "rows_processed": insert_result['rows_processed'],
                         "rows_affected": insert_result['rows_affected']
@@ -687,7 +713,7 @@ def process_attachment_and_store(email_data: dict):
                     results.append({
                         "filename": filename,
                         "table": table_name,
-                        "database": clinic_name,
+                        "database": database_name,
                         "status": "error",
                         "message": insert_result.get('error', 'Unknown error')
                     })
@@ -695,11 +721,11 @@ def process_attachment_and_store(email_data: dict):
             # Process Clients
             elif table_name == 'clients':
                 # Create the clients table
-                if not create_clients_table(clinic_name):
+                if not create_clients_table(database_name):
                     results.append({
                         "filename": filename,
                         "table": table_name,
-                        "database": clinic_name,
+                        "database": database_name,
                         "status": "error",
                         "message": "Failed to create table"
                     })
@@ -712,7 +738,7 @@ def process_attachment_and_store(email_data: dict):
                     results.append({
                         "filename": filename,
                         "table": table_name,
-                        "database": clinic_name,
+                        "database": database_name,
                         "status": "warning",
                         "message": "No attachment data found"
                     })
@@ -724,20 +750,20 @@ def process_attachment_and_store(email_data: dict):
                     results.append({
                         "filename": filename,
                         "table": table_name,
-                        "database": clinic_name,
+                        "database": database_name,
                         "status": "error",
                         "message": "Failed to parse Excel file or file is empty"
                     })
                     continue
                 
                 # Insert data into database
-                insert_result = insert_clients_data(clinic_name, df)
+                insert_result = insert_clients_data(database_name, df)
                 
                 if insert_result['success']:
                     results.append({
                         "filename": filename,
                         "table": table_name,
-                        "database": clinic_name,
+                        "database": database_name,
                         "status": "success",
                         "rows_processed": insert_result['rows_processed'],
                         "rows_affected": insert_result['rows_affected']
@@ -747,7 +773,7 @@ def process_attachment_and_store(email_data: dict):
                     results.append({
                         "filename": filename,
                         "table": table_name,
-                        "database": clinic_name,
+                        "database": database_name,
                         "status": "error",
                         "message": insert_result.get('error', 'Unknown error')
                     })
@@ -764,7 +790,8 @@ def process_attachment_and_store(email_data: dict):
         
         return {
             "status": "success",
-            "clinic": clinic_name,
+            "clinic": database_name,
+            "mode": "online_weekly" if online_weekly_email else "clinic_specific",
             "results": results
         }
         
