@@ -1012,6 +1012,25 @@ app.add_middleware(
 )
 
 
+# Global exception handler to catch any unhandled errors
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch all unhandled exceptions and log them"""
+    logger.error(f"[GLOBAL_ERROR] Unhandled exception: {type(exc).__name__}: {str(exc)}", extra={'request_id': 'error'})
+    logger.error(f"[GLOBAL_ERROR] Path: {request.url.path}", extra={'request_id': 'error'})
+    logger.error(f"[GLOBAL_ERROR] Traceback: {traceback.format_exc()}", extra={'request_id': 'error'})
+    return JSONResponse(
+        status_code=500,
+        content={
+            "status": "error",
+            "error": str(exc),
+            "error_type": type(exc).__name__,
+            "path": str(request.url.path),
+            "timestamp": datetime.now().isoformat()
+        }
+    )
+
+
 @app.on_event("startup")
 async def startup_event():
     """Log startup information"""
@@ -1069,6 +1088,27 @@ async def logging_middleware(request: Request, call_next):
 async def root():
     log_with_request_id('info', "[ENDPOINT] GET / called")
     return {"message": "Email Logger API is running", "status": "active"}
+
+
+@app.post("/test")
+async def test_post(request: Request):
+    """Simple test endpoint to verify POST works"""
+    log_with_request_id('info', "[TEST] POST /test called")
+    try:
+        body = await request.body()
+        body_size = len(body) if body else 0
+        log_with_request_id('info', f"[TEST] Body size: {body_size} bytes")
+        return {
+            "status": "ok",
+            "body_size": body_size,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        log_with_request_id('error', f"[TEST] Error: {type(e).__name__}: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e), "type": type(e).__name__}
+        )
 
 
 @app.post("/webhook/email")
