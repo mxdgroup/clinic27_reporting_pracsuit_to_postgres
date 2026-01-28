@@ -35,18 +35,6 @@ class RequestIdFilter(logging.Filter):
             record.request_id = 'no-request'
         return True
 
-# File handler with UTF-8 encoding
-file_handler = logging.FileHandler('email_logs.log', encoding='utf-8')
-file_handler.setLevel(logging.DEBUG)
-file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
-file_handler.addFilter(RequestIdFilter())
-
-# Console handler with UTF-8 encoding and error handling for Windows
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setLevel(logging.DEBUG)
-console_handler.setFormatter(logging.Formatter(LOG_FORMAT))
-console_handler.addFilter(RequestIdFilter())
-
 # Set UTF-8 encoding on stdout to handle Unicode characters
 if sys.stdout.encoding != 'utf-8':
     try:
@@ -54,9 +42,29 @@ if sys.stdout.encoding != 'utf-8':
     except Exception:
         pass  # Ignore if reconfigure not available
 
+# Console handler (always available - this is what Railway captures)
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setLevel(logging.DEBUG)
+console_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+console_handler.addFilter(RequestIdFilter())
+
+handlers = [console_handler]
+
+# File handler - optional, only if filesystem is writable (not on Railway)
+try:
+    file_handler = logging.FileHandler('email_logs.log', encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    file_handler.addFilter(RequestIdFilter())
+    handlers.append(file_handler)
+except (OSError, PermissionError) as e:
+    # On Railway or read-only filesystems, skip file logging
+    print(f"Note: File logging disabled ({type(e).__name__}), using console only", file=sys.stderr)
+
 logging.basicConfig(
     level=logging.DEBUG,
-    handlers=[file_handler, console_handler]
+    handlers=handlers,
+    force=True  # Override any existing config
 )
 
 logger = logging.getLogger(__name__)
@@ -1073,6 +1081,7 @@ async def receive_email(request: Request):
     
     try:
         # Get the raw body and log its size
+        # NOTE: Body can only be read once, so we parse JSON from it directly
         body = await request.body()
         body_size = len(body) if body else 0
         log_with_request_id('info', f"[WEBHOOK] Request body size: {body_size} bytes")
@@ -1088,10 +1097,10 @@ async def receive_email(request: Request):
                 }
             )
         
-        # Try to parse as JSON
+        # Try to parse as JSON from the body bytes (not request.json() since body was already consumed)
         try:
             log_with_request_id('debug', "[WEBHOOK] Parsing JSON body")
-            email_data = await request.json()
+            email_data = json.loads(body.decode('utf-8'))
             
             log_with_request_id('info', "=" * 80)
             log_with_request_id('info', "NEW EMAIL RECEIVED")
